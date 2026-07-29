@@ -1801,6 +1801,98 @@ func TestToCoreStream_BasicDelta(t *testing.T) {
 	}
 }
 
+func TestToCoreStream_ReasoningStartsAfterLifecycleWithoutPrematureText(t *testing.T) {
+	adapter := newTestAdapter()
+	src := make(chan chat.ChatStreamChunk, 5)
+	src <- chat.ChatStreamChunk{
+		ID: "chatcmpl_reasoning", Model: "qwen-local",
+		Choices: []chat.StreamChoice{{Index: 0, Delta: chat.Delta{Role: "assistant"}}},
+	}
+	src <- chat.ChatStreamChunk{
+		Choices: []chat.StreamChoice{{Index: 0, Delta: chat.Delta{ReasoningContent: "think"}}},
+	}
+	src <- chat.ChatStreamChunk{
+		Choices: []chat.StreamChoice{{Index: 0, Delta: chat.Delta{Content: "answer"}}},
+	}
+	src <- chat.ChatStreamChunk{
+		Choices: []chat.StreamChoice{{Index: 0, FinishReason: "stop"}},
+	}
+	src <- chat.ChatStreamChunk{Usage: &chat.Usage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5}}
+	close(src)
+
+	coreReq := &format.CoreRequest{}
+	format.MarkLocalProvider(coreReq)
+	stream, err := adapter.ToCoreStreamWithRequest(context.Background(), coreReq, (<-chan chat.ChatStreamChunk)(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []format.CoreStreamEvent
+	for event := range stream.Events {
+		events = append(events, event)
+	}
+	want := []format.CoreStreamEventType{
+		format.CoreEventCreated,
+		format.CoreEventInProgress,
+		format.CoreContentBlockStarted,
+		format.CoreTextDelta,
+		format.CoreContentBlockDone,
+		format.CoreContentBlockStarted,
+		format.CoreTextDelta,
+		format.CoreContentBlockDone,
+		format.CoreEventCompleted,
+	}
+	if len(events) != len(want) {
+		t.Fatalf("event count = %d, want %d: %+v", len(events), len(want), events)
+	}
+	for i, eventType := range want {
+		if events[i].Type != eventType {
+			t.Fatalf("event[%d] = %q, want %q", i, events[i].Type, eventType)
+		}
+	}
+	if events[2].Index != 0 || events[2].ContentBlock == nil || events[2].ContentBlock.Type != "reasoning" {
+		t.Fatalf("reasoning start = %+v, want index 0 reasoning", events[2])
+	}
+	if events[5].Index != 1 || events[5].ContentBlock == nil || events[5].ContentBlock.Type != "text" {
+		t.Fatalf("text start = %+v, want index 1 text", events[5])
+	}
+}
+
+func TestToCoreStream_LocalHarnessDoesNotChangeFrontierTranslation(t *testing.T) {
+	adapter := newTestAdapter()
+	src := make(chan chat.ChatStreamChunk, 3)
+	src <- chat.ChatStreamChunk{
+		ID: "chatcmpl_frontier", Model: "frontier-chat",
+		Choices: []chat.StreamChoice{{Index: 0, Delta: chat.Delta{Role: "assistant"}}},
+	}
+	src <- chat.ChatStreamChunk{
+		Choices: []chat.StreamChoice{{Index: 0, Delta: chat.Delta{ReasoningContent: "think"}}},
+	}
+	src <- chat.ChatStreamChunk{
+		Choices: []chat.StreamChoice{{Index: 0, FinishReason: "stop"}},
+	}
+	close(src)
+
+	stream, err := adapter.ToCoreStreamWithRequest(context.Background(), &format.CoreRequest{}, (<-chan chat.ChatStreamChunk)(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []format.CoreStreamEvent
+	for event := range stream.Events {
+		events = append(events, event)
+	}
+	if len(events) < 2 {
+		t.Fatalf("events = %+v", events)
+	}
+	if events[0].Type != format.CoreContentBlockStarted || events[0].ContentBlock == nil || events[0].ContentBlock.Type != "text" {
+		t.Fatalf("frontier first event = %+v, want native text block start", events[0])
+	}
+	for _, event := range events {
+		if event.Type == format.CoreEventCreated || event.Type == format.CoreEventInProgress {
+			t.Fatalf("frontier stream unexpectedly received local lifecycle event: %+v", event)
+		}
+	}
+}
+
 func TestToCoreStream_ToolCallArgsDelta(t *testing.T) {
 	adapter := newTestAdapter()
 	src := make(chan chat.ChatStreamChunk, 4)

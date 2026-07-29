@@ -240,6 +240,17 @@ providers:
   #   offers:
   #     - model: gemini-2.5-flash
 
+  # Local OpenAI Chat-compatible runtime (llama.cpp, vLLM, etc.). Marking the
+  # provider local enables the Codex-compatible reasoning stream harness for
+  # every model it offers without changing frontier-provider translation.
+  # local-llama:
+  #   protocol: "openai-chat"
+  #   local: true
+  #   base_url: "http://127.0.0.1:8080"
+  #   api_key: "local"
+  #   offers:
+  #     - model: my-local-model
+
 # =============================================================================
 # Routes
 # =============================================================================

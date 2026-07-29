@@ -124,6 +124,10 @@ type ProviderDef struct {
 	Version   string
 	UserAgent string
 	Protocol  string // "anthropic" (default), "openai-response", "google-genai", or "openai-chat"
+	// Local marks an on-device provider. Local providers use the compatibility
+	// stream harness needed by open-source reasoning models without changing
+	// frontier-provider protocol behavior.
+	Local bool
 	// Phase 5: Google GenAI flat fields (D-09).
 	// Only relevant when Protocol == ProtocolGoogleGenAI.
 	// project: Google Cloud project ID (Vertex AI).

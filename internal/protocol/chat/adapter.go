@@ -254,6 +254,10 @@ func (a *ChatProviderAdapter) StreamBuffer() []ChatStreamChunk {
 //   - core.text.delta (chunks with content delta)
 //   - core.content_block.done (chunk with finish_reason set)
 //   - core.completed (final chunk with Usage)
+//
+// Requests explicitly marked as local providers additionally emit created and
+// in_progress lifecycle events and defer the first content block until an
+// actual reasoning/text delta establishes its type.
 func (a *ChatProviderAdapter) ToCoreStream(ctx context.Context, src any) (*format.StreamResult, error) {
 	return a.ToCoreStreamWithRequest(ctx, nil, src)
 }
@@ -266,6 +270,7 @@ func (a *ChatProviderAdapter) ToCoreStreamWithRequest(ctx context.Context, req *
 	}
 
 	events := make(chan format.CoreStreamEvent, 64)
+	localStreamHarness := format.IsLocalProvider(req)
 
 	// Per-stream buffer — local to this call, not shared across concurrent requests.
 	var buf []ChatStreamChunk
@@ -292,6 +297,7 @@ func (a *ChatProviderAdapter) ToCoreStreamWithRequest(ctx context.Context, req *
 		var finalUsage *format.CoreUsage
 		var lastModel string
 		var seenCompletion bool
+		var lifecycleStarted bool
 
 		emit := func(ev format.CoreStreamEvent) {
 			seqNum++
@@ -337,6 +343,20 @@ func (a *ChatProviderAdapter) ToCoreStreamWithRequest(ctx context.Context, req *
 				if chunk.Model != "" {
 					lastModel = chunk.Model
 				}
+				if localStreamHarness && !lifecycleStarted && len(chunk.Choices) > 0 {
+					lifecycleStarted = true
+					emit(format.CoreStreamEvent{
+						Type:   format.CoreEventCreated,
+						ItemID: chunk.ID,
+						Model:  chunk.Model,
+						Status: "in_progress",
+					})
+					emit(format.CoreStreamEvent{
+						Type:   format.CoreEventInProgress,
+						Model:  chunk.Model,
+						Status: "in_progress",
+					})
+				}
 
 				// Process each choice in the chunk.
 				for _, sc := range chunk.Choices {
@@ -348,8 +368,9 @@ func (a *ChatProviderAdapter) ToCoreStreamWithRequest(ctx context.Context, req *
 
 					ci := sc.Index
 
-					// Emit content_block.started on first appearance with role.
-					if !state.started && sc.Delta.Role == "assistant" {
+					// Frontier Chat-compatible providers keep their native translation.
+					// The deferred start below is a local-model compatibility rule.
+					if !localStreamHarness && !state.started && sc.Delta.Role == "assistant" {
 						state.started = true
 						blockType := "text"
 						if sc.Delta.ReasoningContent != "" {
@@ -358,30 +379,42 @@ func (a *ChatProviderAdapter) ToCoreStreamWithRequest(ctx context.Context, req *
 							state.reasonIndex = state.blockIndex
 						}
 						emit(format.CoreStreamEvent{
-							Type:        format.CoreContentBlockStarted,
-							Index:       state.blockIndex,
-							ChoiceIndex: &ci,
-							ContentBlock: &format.CoreContentBlock{
-								Type: blockType,
-							},
+							Type:         format.CoreContentBlockStarted,
+							Index:        state.blockIndex,
+							ChoiceIndex:  &ci,
+							ContentBlock: &format.CoreContentBlock{Type: blockType},
 						})
 					}
 
-					// Emit text delta.
 					// Emit reasoning content as text delta.
-					// Note: reasoning_content may appear AFTER the text block has started
-					// (DeepSeek first sends role=assistant, then reasoning_content in subsequent chunks).
+					// Role-only chunks do not open a premature text block. Providers commonly
+					// send role=assistant first and reasoning_content in the next chunk.
 					if sc.Delta.ReasoningContent != "" {
 						if !state.hasReasoning {
-							// Transition from premature text block to reasoning block.
+							if localStreamHarness {
+								// A provider that genuinely emitted text before reasoning needs a
+								// new block. A role-only local prelude keeps reasoning at index 0.
+								if state.started {
+									emit(format.CoreStreamEvent{
+										Type:        format.CoreContentBlockDone,
+										Index:       state.blockIndex,
+										ChoiceIndex: &ci,
+									})
+									state.blockIndex++
+								}
+								state.reasonIndex = state.blockIndex
+								state.started = true
+							} else {
+								// Preserve the native Chat-provider translation.
+								state.reasonIndex = state.blockIndex + 1
+								state.blockIndex = state.reasonIndex
+								emit(format.CoreStreamEvent{
+									Type:        format.CoreContentBlockDone,
+									Index:       state.blockIndex,
+									ChoiceIndex: &ci,
+								})
+							}
 							state.hasReasoning = true
-							state.reasonIndex = state.blockIndex + 1
-							state.blockIndex = state.reasonIndex
-							emit(format.CoreStreamEvent{
-								Type:        format.CoreContentBlockDone,
-								Index:       state.blockIndex,
-								ChoiceIndex: &ci,
-							})
 							emit(format.CoreStreamEvent{
 								Type:        format.CoreContentBlockStarted,
 								Index:       state.reasonIndex,
@@ -414,6 +447,9 @@ func (a *ChatProviderAdapter) ToCoreStreamWithRequest(ctx context.Context, req *
 						state.reasoningContent = ""
 						state.hasReasoning = false
 						state.blockIndex = state.reasonIndex + 1
+						if localStreamHarness {
+							state.started = true
+						}
 						emit(format.CoreStreamEvent{
 							Type:        format.CoreContentBlockStarted,
 							Index:       state.blockIndex,
@@ -424,6 +460,15 @@ func (a *ChatProviderAdapter) ToCoreStreamWithRequest(ctx context.Context, req *
 						})
 					}
 					if sc.Delta.Content != "" {
+						if localStreamHarness && !state.started {
+							state.started = true
+							emit(format.CoreStreamEvent{
+								Type:         format.CoreContentBlockStarted,
+								Index:        state.blockIndex,
+								ChoiceIndex:  &ci,
+								ContentBlock: &format.CoreContentBlock{Type: "text"},
+							})
+						}
 						emit(format.CoreStreamEvent{
 							Type:        format.CoreTextDelta,
 							Index:       state.blockIndex,
@@ -497,7 +542,7 @@ func (a *ChatProviderAdapter) ToCoreStreamWithRequest(ctx context.Context, req *
 					// Emit content_block.done when finish_reason is set.
 					if sc.FinishReason != "" {
 						stopReason := a.mapFinishReason(sc.FinishReason)
-						if state.hasReasoning {
+						if (!localStreamHarness || state.started) && state.hasReasoning {
 							emit(format.CoreStreamEvent{
 								Type:        format.CoreContentBlockDone,
 								Index:       state.blockIndex,
@@ -509,13 +554,17 @@ func (a *ChatProviderAdapter) ToCoreStreamWithRequest(ctx context.Context, req *
 								},
 							})
 							state.reasoningContent = ""
-						} else {
+						} else if !localStreamHarness || state.started {
 							emit(format.CoreStreamEvent{
 								Type:        format.CoreContentBlockDone,
 								Index:       state.blockIndex,
 								StopReason:  stopReason,
 								ChoiceIndex: &ci,
 							})
+						}
+						if localStreamHarness {
+							state.started = false
+							state.hasReasoning = false
 						}
 						// Complete tool call blocks.
 						for idx := state.blockIndex + 1; idx < state.toolCallIdx; idx++ {

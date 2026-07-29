@@ -255,11 +255,12 @@ type ReasoningItemSummary struct {
 
 // ReasoningSummaryPartAddedEvent is emitted when a reasoning summary part is added.
 type ReasoningSummaryPartAddedEvent struct {
-	Type           string `json:"type"`
-	SequenceNumber int64  `json:"sequence_number"`
-	ItemID         string `json:"item_id"`
-	OutputIndex    int    `json:"output_index"`
-	SummaryIndex   int    `json:"summary_index"`
+	Type           string                `json:"type"`
+	SequenceNumber int64                 `json:"sequence_number"`
+	ItemID         string                `json:"item_id"`
+	OutputIndex    int                   `json:"output_index"`
+	SummaryIndex   int                   `json:"summary_index"`
+	Part           *ReasoningItemSummary `json:"part,omitempty"`
 }
 
 // ReasoningSummaryTextDeltaEvent is emitted for reasoning text deltas.
@@ -272,11 +273,22 @@ type ReasoningSummaryTextDeltaEvent struct {
 	Delta          string `json:"delta"`
 }
 
-// ReasoningSummaryPartDoneEvent is emitted when a reasoning summary part is complete.
-type ReasoningSummaryPartDoneEvent struct {
+// ReasoningSummaryTextDoneEvent is emitted when a reasoning summary's text is complete.
+type ReasoningSummaryTextDoneEvent struct {
 	Type           string `json:"type"`
 	SequenceNumber int64  `json:"sequence_number"`
 	ItemID         string `json:"item_id"`
 	OutputIndex    int    `json:"output_index"`
 	SummaryIndex   int    `json:"summary_index"`
+	Text           string `json:"text"`
+}
+
+// ReasoningSummaryPartDoneEvent is emitted when a reasoning summary part is complete.
+type ReasoningSummaryPartDoneEvent struct {
+	Type           string                `json:"type"`
+	SequenceNumber int64                 `json:"sequence_number"`
+	ItemID         string                `json:"item_id"`
+	OutputIndex    int                   `json:"output_index"`
+	SummaryIndex   int                   `json:"summary_index"`
+	Part           *ReasoningItemSummary `json:"part,omitempty"`
 }

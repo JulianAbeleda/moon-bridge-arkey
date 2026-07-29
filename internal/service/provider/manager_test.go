@@ -107,6 +107,7 @@ func TestResolveModel_RouteAliasPriority(t *testing.T) {
 		"p2": {
 			BaseURL: "https://p2.test",
 			APIKey:  "key-p2",
+			Local:   true,
 		},
 	}, map[string]ModelRoute{
 		"claude-sonnet-4-5": {Provider: "p2", Name: "claude-sonnet-4-5-v2"},
@@ -128,6 +129,9 @@ func TestResolveModel_RouteAliasPriority(t *testing.T) {
 	}
 	if route.Candidates[0].UpstreamModel != "claude-sonnet-4-5-v2" {
 		t.Errorf("expected upstream model claude-sonnet-4-5-v2, got %s", route.Candidates[0].UpstreamModel)
+	}
+	if !route.Candidates[0].Local {
+		t.Fatal("route candidate did not preserve the provider's local marker")
 	}
 }
 

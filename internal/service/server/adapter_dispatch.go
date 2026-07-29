@@ -189,6 +189,9 @@ func (s *Server) handleWithAdapters(
 	// ------------------------------------------------------------------
 	// Override CoreRequest model alias with upstream model name so
 	// the upstream provider receives the correct model identifier.
+	if preferred.Local {
+		format.MarkLocalProvider(coreReq)
+	}
 	coreReq.Model = preferred.UpstreamModel
 
 	wsMode := resolvedWebSearchMode(pm, openAIReq.Model, preferred)

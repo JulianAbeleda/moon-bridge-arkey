@@ -32,6 +32,7 @@ type ProviderConfig struct {
 	Version          string               `yaml:"version"`
 	UserAgent        string               `yaml:"user_agent"`
 	Protocol         string               // "anthropic" (default) or "openai-response"
+	Local            bool                 // on-device provider; enables local-only stream compatibility
 	HTTP             HTTPConfig           `yaml:"http"`
 	WebSearchSupport string               // "auto", "enabled", "disabled", "injected", or "" (inherit global)
 	ModelNames       []string             // upstream model names for this provider
@@ -57,6 +58,7 @@ type ProviderCandidate struct {
 	ProviderKey   string
 	UpstreamModel string
 	Protocol      string // "anthropic" | "openai-response"
+	Local         bool
 	Client        ProviderClient
 }
 
@@ -242,6 +244,7 @@ func (pm *ProviderManager) Reload(cfg config.ProviderConfig) error {
 			Version:          def.Version,
 			UserAgent:        def.UserAgent,
 			Protocol:         def.Protocol,
+			Local:            def.Local,
 			WebSearchSupport: string(def.WebSearchSupport),
 			ModelNames:       modelNames,
 			Models:           models,
@@ -334,6 +337,7 @@ func (pm *ProviderManager) ResolveModel(modelName string) (*ResolvedRoute, error
 				ProviderKey:   providerKey,
 				UpstreamModel: route.Name,
 				Protocol:      pm.protocolForKeyInline(providerKey),
+				Local:         pm.providers[providerKey].Local,
 				Client:        client,
 			}},
 		}, nil
@@ -350,6 +354,7 @@ func (pm *ProviderManager) ResolveModel(modelName string) (*ResolvedRoute, error
 				ProviderKey:   providerKey,
 				UpstreamModel: upstreamModel,
 				Protocol:      pm.protocolForKeyInline(providerKey),
+				Local:         pm.providers[providerKey].Local,
 				Client:        client,
 			}},
 		}, nil
@@ -378,6 +383,7 @@ func (pm *ProviderManager) ResolveModel(modelName string) (*ResolvedRoute, error
 				ProviderKey:   entry.providerKey,
 				UpstreamModel: modelName,
 				Protocol:      pm.protocolForKeyInline(entry.providerKey),
+				Local:         pm.providers[entry.providerKey].Local,
 				Client:        client,
 			})
 		}

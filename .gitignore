@@ -73,6 +73,7 @@ webui/playwright-report/
 /moonbridge
 /logs/
 logs/
+.moonbridge.pid
 !/webui/src/features/logs/
 *.log
 .omx/

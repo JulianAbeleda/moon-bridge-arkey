@@ -393,6 +393,7 @@ type nestedBufferState struct {
 
 func (a *OpenAIAdapter) streamLoopWithBuf(ctx context.Context, coreReq *format.CoreRequest, events <-chan format.CoreStreamEvent, out chan<- StreamEvent, buf *[]StreamEvent, bufMu *sync.Mutex) {
 	defer close(out)
+	localStreamHarness := format.IsLocalProvider(coreReq)
 
 	// send buffers the event for trace capture before writing to the output channel.
 	send := func(ev StreamEvent) {
@@ -486,11 +487,17 @@ func (a *OpenAIAdapter) streamLoopWithBuf(ctx context.Context, coreReq *format.C
 				reasonIndexes[index] = true
 				io := len(response.Output)
 				outputIndexes[index] = io
+				summary := []ReasoningItemSummary{}
+				if localStreamHarness {
+					// Codex deserializes reasoning items only when the required summary
+					// array is present. Seed one empty part before streaming its deltas.
+					summary = []ReasoningItemSummary{{Type: "summary_text", Text: ""}}
+				}
 				response.Output = append(response.Output, OutputItem{
 					Type:    "reasoning",
 					ID:      id,
 					Status:  "in_progress",
-					Summary: []ReasoningItemSummary{},
+					Summary: summary,
 				})
 				send(StreamEvent{
 					Event: "response.output_item.added",
@@ -501,15 +508,19 @@ func (a *OpenAIAdapter) streamLoopWithBuf(ctx context.Context, coreReq *format.C
 						Item:           response.Output[io],
 					},
 				})
+				partAdded := ReasoningSummaryPartAddedEvent{
+					Type:           "response.reasoning_summary_part.added",
+					SequenceNumber: next(),
+					ItemID:         id,
+					OutputIndex:    io,
+					SummaryIndex:   0,
+				}
+				if localStreamHarness {
+					partAdded.Part = &ReasoningItemSummary{Type: "summary_text", Text: ""}
+				}
 				send(StreamEvent{
 					Event: "response.reasoning_summary_part.added",
-					Data: ReasoningSummaryPartAddedEvent{
-						Type:           "response.reasoning_summary_part.added",
-						SequenceNumber: next(),
-						ItemID:         id,
-						OutputIndex:    io,
-						SummaryIndex:   0,
-					},
+					Data:  partAdded,
 				})
 				contentText[index] = ""
 			case "tool_use":
@@ -925,6 +936,13 @@ func (a *OpenAIAdapter) streamLoopWithBuf(ctx context.Context, coreReq *format.C
 
 			// Reasoning block done — emit reasoning summary part done.
 			if reasonIndexes[index] {
+				itemID := itemIDs[index]
+				outputIndex := outputIndexes[index]
+				text := contentText[index]
+				summaryType := "text"
+				if localStreamHarness {
+					summaryType = "summary_text"
+				}
 				if idx, ok := outputIndexes[index]; ok && idx < len(response.Output) {
 					response.Output[idx].Status = "completed"
 					sig := ""
@@ -932,21 +950,49 @@ func (a *OpenAIAdapter) streamLoopWithBuf(ctx context.Context, coreReq *format.C
 						sig = event.ContentBlock.ReasoningSignature
 					}
 					response.Output[idx].Summary = []ReasoningItemSummary{{
-						Type:      "text",
-						Text:      contentText[index],
+						Type:      summaryType,
+						Text:      text,
 						Signature: sig,
 					}}
 				}
+				if localStreamHarness {
+					send(StreamEvent{
+						Event: "response.reasoning_summary_text.done",
+						Data: ReasoningSummaryTextDoneEvent{
+							Type:           "response.reasoning_summary_text.done",
+							SequenceNumber: next(),
+							ItemID:         itemID,
+							OutputIndex:    outputIndex,
+							SummaryIndex:   0,
+							Text:           text,
+						},
+					})
+				}
+				partDone := ReasoningSummaryPartDoneEvent{
+					Type:           "response.reasoning_summary_part.done",
+					SequenceNumber: next(),
+					ItemID:         itemID,
+					OutputIndex:    outputIndex,
+					SummaryIndex:   0,
+				}
+				if localStreamHarness {
+					partDone.Part = &ReasoningItemSummary{Type: "summary_text", Text: text}
+				}
 				send(StreamEvent{
 					Event: "response.reasoning_summary_part.done",
-					Data: ReasoningSummaryPartDoneEvent{
-						Type:           "response.reasoning_summary_part.done",
-						SequenceNumber: next(),
-						ItemID:         itemIDs[index],
-						OutputIndex:    outputIndexes[index],
-						SummaryIndex:   0,
-					},
+					Data:  partDone,
 				})
+				if localStreamHarness && outputIndex < len(response.Output) {
+					send(StreamEvent{
+						Event: "response.output_item.done",
+						Data: OutputItemEvent{
+							Type:           "response.output_item.done",
+							SequenceNumber: next(),
+							OutputIndex:    outputIndex,
+							Item:           response.Output[outputIndex],
+						},
+					})
+				}
 				delete(contentText, index)
 				delete(itemIDs, index)
 				delete(outputIndexes, index)

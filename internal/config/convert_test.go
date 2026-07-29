@@ -48,6 +48,7 @@ providers:
     api_key: sk-ant-xxx
     version: 2023-06-01
     protocol: anthropic
+    local: true
     web_search:
       support: enabled
     offers:
@@ -147,6 +148,9 @@ routes:
 		checkStringEqual(t, "ProviderDefs["+key+"].APIKey", def.APIKey, def2.APIKey)
 		checkStringEqual(t, "ProviderDefs["+key+"].Version", def.Version, def2.Version)
 		checkStringEqual(t, "ProviderDefs["+key+"].Protocol", def.Protocol, def2.Protocol)
+		if def.Local != def2.Local {
+			t.Fatalf("ProviderDefs[%q].Local = %v, want %v", key, def2.Local, def.Local)
+		}
 		checkStringEqual(t, "ProviderDefs["+key+"].WebSearchSupport", string(def.WebSearchSupport), string(def2.WebSearchSupport))
 
 		// Offers.

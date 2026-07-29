@@ -438,3 +438,73 @@ func TestFromCoreStream_NoDuplicateDoneForToolUse(t *testing.T) {
 		t.Fatalf("output_item.done (tool) count=%d, want 1", itemDone)
 	}
 }
+
+func TestFromCoreStream_LocalReasoningLifecycleIsCodexCompatible(t *testing.T) {
+	adapter := openai.NewOpenAIAdapter(format.CorePluginHooks{})
+	coreReq := &format.CoreRequest{Model: "arkey-local"}
+	format.MarkLocalProvider(coreReq)
+	evCh := make(chan format.CoreStreamEvent, 4)
+	evCh <- format.CoreStreamEvent{Type: format.CoreContentBlockStarted, Index: 0, ContentBlock: &format.CoreContentBlock{Type: "reasoning"}}
+	evCh <- format.CoreStreamEvent{Type: format.CoreTextDelta, Index: 0, Delta: "local thought"}
+	evCh <- format.CoreStreamEvent{Type: format.CoreContentBlockDone, Index: 0, ContentBlock: &format.CoreContentBlock{Type: "reasoning"}}
+	evCh <- format.CoreStreamEvent{Type: format.CoreEventCompleted, Status: "completed"}
+	close(evCh)
+
+	streamAny, err := adapter.FromCoreStream(context.Background(), coreReq, evCh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := streamAny.(*openai.OpenAIStreamResult).Chan()
+	var added *openai.OutputItemEvent
+	var summaryDone, itemDone int
+	for event := range stream {
+		switch event.Event {
+		case "response.output_item.added":
+			value := event.Data.(openai.OutputItemEvent)
+			if value.Item.Type == "reasoning" {
+				added = &value
+			}
+		case "response.reasoning_summary_text.done":
+			summaryDone++
+		case "response.output_item.done":
+			value := event.Data.(openai.OutputItemEvent)
+			if value.Item.Type == "reasoning" {
+				itemDone++
+				if len(value.Item.Summary) != 1 || value.Item.Summary[0].Type != "summary_text" || value.Item.Summary[0].Text != "local thought" {
+					t.Fatalf("completed reasoning item = %+v", value.Item)
+				}
+			}
+		}
+	}
+	if added == nil || len(added.Item.Summary) != 1 || added.Item.Summary[0].Type != "summary_text" {
+		t.Fatalf("local reasoning item did not seed the required summary array: %+v", added)
+	}
+	if summaryDone != 1 || itemDone != 1 {
+		t.Fatalf("local lifecycle counts: summary text done=%d, reasoning item done=%d", summaryDone, itemDone)
+	}
+}
+
+func TestFromCoreStream_LocalReasoningLifecycleDoesNotAffectFrontier(t *testing.T) {
+	adapter := openai.NewOpenAIAdapter(format.CorePluginHooks{})
+	evCh := make(chan format.CoreStreamEvent, 3)
+	evCh <- format.CoreStreamEvent{Type: format.CoreContentBlockStarted, Index: 0, ContentBlock: &format.CoreContentBlock{Type: "reasoning"}}
+	evCh <- format.CoreStreamEvent{Type: format.CoreContentBlockDone, Index: 0, ContentBlock: &format.CoreContentBlock{Type: "reasoning"}}
+	evCh <- format.CoreStreamEvent{Type: format.CoreEventCompleted, Status: "completed"}
+	close(evCh)
+
+	streamAny, err := adapter.FromCoreStream(context.Background(), &format.CoreRequest{Model: "frontier"}, evCh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for event := range streamAny.(*openai.OpenAIStreamResult).Chan() {
+		if event.Event == "response.reasoning_summary_text.done" {
+			t.Fatal("frontier stream received local reasoning-summary completion")
+		}
+		if event.Event == "response.output_item.done" {
+			value := event.Data.(openai.OutputItemEvent)
+			if value.Item.Type == "reasoning" {
+				t.Fatal("frontier stream received local reasoning-item completion")
+			}
+		}
+	}
+}

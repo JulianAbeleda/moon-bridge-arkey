@@ -23,6 +23,7 @@ func BuildProviderDefsFromConfig(cfg config.ProviderConfig) map[string]ProviderC
 			Version:          def.Version,
 			UserAgent:        def.UserAgent,
 			Protocol:         def.Protocol,
+			Local:            def.Local,
 			WebSearchSupport: string(def.WebSearchSupport),
 			ModelNames:       modelNames,
 			Models:           models,

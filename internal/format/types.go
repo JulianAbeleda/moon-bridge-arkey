@@ -190,6 +190,31 @@ type CoreRequest struct {
 	Extensions map[string]any `json:"extensions,omitempty"`
 }
 
+const localProviderMetadataKey = "moonbridge.local_provider"
+
+// MarkLocalProvider records that the resolved upstream is an on-device model.
+// The marker stays inside Core and is consumed by protocol adapters; it is not
+// forwarded to the upstream model API.
+func MarkLocalProvider(req *CoreRequest) {
+	if req == nil {
+		return
+	}
+	if req.Metadata == nil {
+		req.Metadata = make(map[string]any)
+	}
+	req.Metadata[localProviderMetadataKey] = true
+}
+
+// IsLocalProvider reports whether a request was routed to an explicitly local
+// provider.
+func IsLocalProvider(req *CoreRequest) bool {
+	if req == nil || req.Metadata == nil {
+		return false
+	}
+	local, _ := req.Metadata[localProviderMetadataKey].(bool)
+	return local
+}
+
 // ============================================================================
 // Usage
 // ============================================================================

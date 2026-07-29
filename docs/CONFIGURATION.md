@@ -122,6 +122,7 @@ providers:
     version: "2023-06-01"
     user_agent: "moonbridge/1.0"
     protocol: "anthropic"         # 默认 anthropic
+    local: false                    # 本地模型 Provider 设为 true
 
     # Google GenAI 特有字段（protocol: google-genai）
     project: "my-gcp-project"
@@ -152,6 +153,11 @@ providers:
 | `openai-response` | OpenAI Responses API | `internal/protocol/openai`（直通） |
 | `google-genai` | Google Generative AI (Gemini) API | `internal/protocol/google` |
 | `openai-chat` | OpenAI Chat Completions API | `internal/protocol/chat` |
+
+本地 OpenAI Chat 兼容服务（例如 llama.cpp）应在 Provider 上设置
+`local: true`。该标记会为此 Provider 提供的所有模型启用 Codex 兼容的
+reasoning summary 流生命周期；未标记的 Frontier Provider 和 DeepSeek
+扩展不会经过这条本地兼容路径。
 
 ## Routes
 

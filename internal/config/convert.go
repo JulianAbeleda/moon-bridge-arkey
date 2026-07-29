@@ -147,6 +147,7 @@ func toProviderDefFileConfig(def ProviderDef) ProviderDefFileConfig {
 		Version:   def.Version,
 		UserAgent: def.UserAgent,
 		Protocol:  def.Protocol,
+		Local:     def.Local,
 		WebSearch: WebSearchFileConfig{
 			Support:         string(def.WebSearchSupport),
 			MaxUses:         def.WebSearchMaxUses,
