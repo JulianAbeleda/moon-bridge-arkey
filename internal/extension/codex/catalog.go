@@ -122,7 +122,8 @@ func BuildModelInfoFromRoute(alias string, ownedBy string, route config.RouteEnt
 		route.SupportsReasoningSummaries, route.DefaultReasoningSummary,
 		route.BaseInstructions,
 		inputModalitiesOrDefault(route.InputModalities),
-		route.SupportsImageDetailOriginal)
+		route.SupportsImageDetailOriginal,
+		[]string{})
 }
 
 // BuildModelInfoFromProviderModel creates a Codex-compatible ModelInfo from a
@@ -139,7 +140,8 @@ func BuildModelInfoFromProviderModel(slug string, ownedBy string, meta config.Mo
 		meta.SupportsReasoningSummaries, meta.DefaultReasoningSummary,
 		meta.BaseInstructions,
 		inputModalitiesOrDefault(meta.InputModalities),
-		meta.SupportsImageDetailOriginal)
+		meta.SupportsImageDetailOriginal,
+		[]string{})
 }
 
 // BuildModelInfosFromConfig returns Codex model catalog entries.
@@ -189,6 +191,7 @@ func BuildModelInfosFromConfig(providerCfg config.ProviderConfig, pluginCfg conf
 			def.BaseInstructions,
 			inputModalitiesOrDefault(def.InputModalities),
 			def.SupportsImageDetailOriginal,
+			experimentalToolsForModel(providerCfg, slug),
 		))
 	}
 
@@ -217,7 +220,9 @@ func BuildModelInfosFromConfig(providerCfg config.ProviderConfig, pluginCfg conf
 		if route.Provider != "" {
 			ownedBy = route.Provider
 		}
-		models = append(models, BuildModelInfoFromRoute(alias, ownedBy, route))
+		models = append(models, BuildModelInfoFromRouteWithTools(alias, ownedBy, route,
+			experimentalToolsForModel(providerCfg, alias),
+		))
 	}
 
 	models = injectVisualModalities(models, pluginCfg)
@@ -344,9 +349,54 @@ func buildModelInfosFromProviderDefs(providerCfg config.ProviderConfig) []ModelI
 			preferred.meta.BaseInstructions,
 			inputModalitiesOrDefault(mergedModalities),
 			supportsImageDetailOriginal,
+			experimentalToolsForModel(providerCfg, slug),
 		))
 	}
 	return models
+}
+
+func BuildModelInfoFromRouteWithTools(alias string, ownedBy string, route config.RouteEntry, experimentalSupportedTools []string) ModelInfo {
+	info := BuildModelInfoFromRoute(alias, ownedBy, route)
+	if len(experimentalSupportedTools) == 0 {
+		experimentalSupportedTools = []string{}
+	}
+	info.ExperimentalSupportedTools = experimentalSupportedTools
+	return info
+}
+
+func experimentalToolsForModel(providerCfg config.ProviderConfig, modelAlias string) []string {
+	provider, ok := providerForModel(providerCfg, modelAlias)
+	if !ok {
+		return []string{}
+	}
+	if provider != "deepseek" {
+		return []string{}
+	}
+	return []string{"multi_agent_v1"}
+}
+
+func providerForModel(providerCfg config.ProviderConfig, modelAlias string) (string, bool) {
+	if route, ok := providerCfg.Routes[modelAlias]; ok {
+		if route.Provider != "" {
+			return route.Provider, true
+		}
+	}
+
+	for provider, def := range providerCfg.Providers {
+		if _, ok := def.Models[modelAlias]; ok {
+			return provider, true
+		}
+		for _, offer := range def.Offers {
+			offerModel := offer.Model
+			if offerModel == "" {
+				offerModel = offer.UpstreamName
+			}
+			if offerModel == modelAlias {
+				return provider, true
+			}
+		}
+	}
+	return "", false
 }
 
 func injectVisualModalities(models []ModelInfo, pluginCfg config.PluginConfig) []ModelInfo {
@@ -388,6 +438,7 @@ func newModelInfo(
 	baseInstructions string,
 	inputModalities []string,
 	supportsImageDetailOriginal bool,
+	experimentalSupportedTools []string,
 ) ModelInfo {
 	if !supportsReasoning {
 		defaultReasoningLevel = ""
@@ -436,7 +487,7 @@ func newModelInfo(
 		ContextWindow:               ctxWin,
 		MaxContextWindow:            maxCtxWin,
 		EffectiveContextWindowPct:   95,
-		ExperimentalSupportedTools:  []string{},
+		ExperimentalSupportedTools:  experimentalSupportedTools,
 		InputModalities:             inputModalities,
 		SupportsImageDetailOriginal: supportsImageDetailOriginal,
 	}

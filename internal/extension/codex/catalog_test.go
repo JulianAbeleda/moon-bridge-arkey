@@ -34,6 +34,36 @@ func TestBuildModelInfoFromRouteUsesTokenTruncationPolicy(t *testing.T) {
 	}
 }
 
+func TestBuildModelInfosFromConfig_ExposesDeepSeekExperimentalTools(t *testing.T) {
+	cfg := config.Config{
+		ProviderDefs: map[string]config.ProviderDef{
+			"deepseek": {
+				Models: map[string]config.ModelMeta{
+					"deepseek-v4-pro": {},
+				},
+			},
+		},
+	}
+
+	models := codex.BuildModelInfosFromConfig(config.ProviderFromGlobalConfig(&cfg), config.PluginConfig{})
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(models))
+	}
+	if models[0].Slug != "deepseek-v4-pro" {
+		t.Fatalf("slug = %q, want deepseek-v4-pro", models[0].Slug)
+	}
+	if len(models[0].ExperimentalSupportedTools) != 1 || models[0].ExperimentalSupportedTools[0] != "multi_agent_v1" {
+		t.Fatalf("experimental_supported_tools = %v, want [multi_agent_v1]", models[0].ExperimentalSupportedTools)
+	}
+}
+
+func TestBuildModelInfoFromRouteWithToolsSetsExperimentalTools(t *testing.T) {
+	info := codex.BuildModelInfoFromRouteWithTools("deepseek-v4-pro", "deepseek", config.RouteEntry{}, []string{"multi_agent_v1"})
+	if len(info.ExperimentalSupportedTools) != 1 || info.ExperimentalSupportedTools[0] != "multi_agent_v1" {
+		t.Fatalf("experimental_supported_tools = %v, want [multi_agent_v1]", info.ExperimentalSupportedTools)
+	}
+}
+
 func TestBuildModelInfosFromConfigIncludesProviderModelsBeforeRouteFallback(t *testing.T) {
 	models := codex.BuildModelInfosFromConfig(config.ProviderConfig{
 		Providers: map[string]config.ProviderDef{

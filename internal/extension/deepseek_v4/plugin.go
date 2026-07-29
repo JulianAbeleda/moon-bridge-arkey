@@ -404,9 +404,38 @@ func (p *DSPlugin) TransformError(_ *plugin.RequestContext, msg string) string {
 
 // MutateCoreRequest injects DeepSeek thinking configuration into the CoreRequest.
 func (p *DSPlugin) MutateCoreRequest(ctx context.Context, req *format.CoreRequest) {
+	if req == nil {
+		return
+	}
 	if req.Extensions == nil {
 		req.Extensions = make(map[string]any)
 	}
+
+	// Keep parity with the legacy RequestMutator path:
+	// explicit user reasoning should win, and unsupported sampling knobs are removed.
+	explicitEffort := ""
+	hasExplicitEffort := false
+	if openaiExt, ok := req.Extensions["openai"].(map[string]any); ok {
+		if reasoning, ok := openaiExt["reasoning"].(map[string]any); ok {
+			hasExplicitEffort = true
+			if effort, ok := reasoningEffort(reasoning); ok {
+				explicitEffort = effort
+			}
+		}
+	}
+	if req.Output != nil && req.Output.Effort != "" {
+		hasExplicitEffort = true
+		explicitEffort = req.Output.Effort
+	}
+	if !hasExplicitEffort {
+		explicitEffort = p.defaultReasoningEffort(req.Model)
+	}
+	if explicitEffort != "" {
+		req.Output = &format.CoreOutputConfig{Effort: explicitEffort}
+	}
+
+	req.Temperature = nil
+	req.TopP = nil
 
 	// Read thinking budget from extension config, default to 4096.
 	budgetTokens := 4096
@@ -421,6 +450,59 @@ func (p *DSPlugin) MutateCoreRequest(ctx context.Context, req *format.CoreReques
 	req.Extensions["thinking"] = map[string]any{
 		"budget_tokens": budgetTokens,
 	}
+}
+
+func (p *DSPlugin) defaultReasoningEffort(modelAlias string) string {
+	if p.currentConfig == nil {
+		return ""
+	}
+	cfg := p.currentConfig()
+
+	modelAlias = strings.TrimSpace(modelAlias)
+	if modelAlias == "" {
+		return ""
+	}
+
+	normalize := func(defaultEffort string, presets []config.ReasoningLevelPreset) string {
+		defaultEffort = strings.TrimSpace(defaultEffort)
+		if defaultEffort == "" {
+			return ""
+		}
+		effort, ok := reasoningEffort(map[string]any{"effort": defaultEffort})
+		if !ok {
+			return ""
+		}
+		if len(presets) == 0 {
+			return effort
+		}
+		for _, preset := range presets {
+			if strings.EqualFold(strings.TrimSpace(preset.Effort), defaultEffort) {
+				return effort
+			}
+		}
+		return ""
+	}
+
+	if route, ok := cfg.Routes[modelAlias]; ok {
+		if effort := normalize(route.DefaultReasoningLevel, route.SupportedReasoningLevels); effort != "" {
+			return effort
+		}
+	}
+	if provider, upstreamModel := config.ParseModelRef(modelAlias); provider != "" {
+		if meta, ok := cfg.ModelMetaFor(upstreamModel, provider); ok {
+			if effort := normalize(meta.DefaultReasoningLevel, meta.SupportedReasoningLevels); effort != "" {
+				return effort
+			}
+		}
+	}
+	for _, providerDef := range cfg.ProviderDefs {
+		if meta, ok := providerDef.Models[modelAlias]; ok {
+			if effort := normalize(meta.DefaultReasoningLevel, meta.SupportedReasoningLevels); effort != "" {
+				return effort
+			}
+		}
+	}
+	return ""
 }
 
 // --- ReasoningExtractor ---

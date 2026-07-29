@@ -2,11 +2,13 @@ package deepseekv4
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"strings"
 	"testing"
 
+	"moonbridge/internal/config"
 	pluginpkg "moonbridge/internal/extension/plugin"
 	"moonbridge/internal/format"
 	"moonbridge/internal/protocol/anthropic"
@@ -174,3 +176,104 @@ func TestPrependThinkingWarnsWhenUsingRequiredFallback(t *testing.T) {
 		t.Fatalf("unexpected warning for cached thinking = %q", logs.String())
 	}
 }
+
+func TestMutateCoreRequestUsesExplicitReasoningEffort(t *testing.T) {
+	p := NewPlugin(func(string) bool { return true })
+	p.cfg = &Config{}
+	p.currentConfig = func() config.Config {
+		return config.Config{
+			Routes: map[string]config.RouteEntry{
+				"deepseek-v4-flash": {
+					DefaultReasoningLevel: "high",
+					SupportedReasoningLevels: []config.ReasoningLevelPreset{
+						{Effort: "high"},
+						{Effort: "xhigh"},
+					},
+				},
+			},
+		}
+	}
+
+	req := &format.CoreRequest{
+		Model: "deepseek-v4-flash",
+		Extensions: map[string]any{
+			"openai": map[string]any{
+				"reasoning": map[string]any{"effort": "xhigh"},
+			},
+		},
+		Temperature: ptrFloat(0.7),
+		TopP:        ptrFloat(0.9),
+	}
+	p.MutateCoreRequest(context.Background(), req)
+
+	if req.Output == nil || req.Output.Effort != "max" {
+		t.Fatalf("Output = %+v, want effort max", req.Output)
+	}
+	if req.Temperature != nil {
+		t.Fatal("temperature should be cleared")
+	}
+	if req.TopP != nil {
+		t.Fatal("top_p should be cleared")
+	}
+}
+
+func TestMutateCoreRequestUsesDefaultReasoningFromMetadata(t *testing.T) {
+	p := NewPlugin(func(string) bool { return true })
+	p.cfg = &Config{}
+	p.currentConfig = func() config.Config {
+		return config.Config{
+			Routes: map[string]config.RouteEntry{
+				"deepseek-v4-flash": {
+					DefaultReasoningLevel: "xhigh",
+					SupportedReasoningLevels: []config.ReasoningLevelPreset{
+						{Effort: "high"},
+						{Effort: "xhigh"},
+					},
+				},
+			},
+		}
+	}
+
+	req := &format.CoreRequest{
+		Model: "deepseek-v4-flash",
+	}
+	p.MutateCoreRequest(context.Background(), req)
+
+	if req.Output == nil || req.Output.Effort != "max" {
+		t.Fatalf("Output = %+v, want effort max", req.Output)
+	}
+}
+
+func TestMutateCoreRequestSkipsDefaultWhenEffortExplicitlyProvidedEvenIfUnsupported(t *testing.T) {
+	p := NewPlugin(func(string) bool { return true })
+	p.cfg = &Config{}
+	p.currentConfig = func() config.Config {
+		return config.Config{
+			Routes: map[string]config.RouteEntry{
+				"deepseek-v4-flash": {
+					DefaultReasoningLevel: "high",
+					SupportedReasoningLevels: []config.ReasoningLevelPreset{
+						{Effort: "high"},
+						{Effort: "xhigh"},
+					},
+				},
+			},
+		}
+	}
+
+	req := &format.CoreRequest{
+		Model: "deepseek-v4-flash",
+		Extensions: map[string]any{
+			"openai": map[string]any{
+				"reasoning": map[string]any{"effort": "medium"},
+			},
+		},
+	}
+	p.MutateCoreRequest(context.Background(), req)
+
+	if req.Output != nil && req.Output.Effort != "" {
+		t.Fatalf("Output = %+v, want no output effort override for unsupported explicit reasoning", req.Output)
+	}
+}
+
+func ptrFloat(v float64) *float64 { return &v }
