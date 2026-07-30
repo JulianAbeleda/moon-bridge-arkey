@@ -247,7 +247,14 @@ func runTransform(ctx context.Context, cfg config.Config, errors io.Writer) erro
 	coreHooks := plugins.CorePluginHooks()
 
 	// Inbound: OpenAI Responses client adapter.
-	oaiAdapter := openai.NewOpenAIAdapter(coreHooks, codextool.NestedOneOf)
+	//
+	// Flat rather than NestedOneOf: llama.cpp's JSON-Schema-to-GBNF converter
+	// does not handle oneOf, so a nested namespace tool compiles to a grammar
+	// that only permits {} and every MCP tool call comes back with empty
+	// arguments. Verified directly against llama-server with MoonBridge out of
+	// the path. Flat costs more prompt tokens per namespace but works on both
+	// local and frontier models.
+	oaiAdapter := openai.NewOpenAIAdapter(coreHooks, codextool.Flat)
 	_ = adapterReg.RegisterClient(oaiAdapter)
 	_ = adapterReg.RegisterClientStream(oaiAdapter)
 
