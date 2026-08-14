@@ -107,9 +107,14 @@ flowchart TB
 
 | 模式 | 入口协议 → 上游协议 | 描述 |
 |------|---------------------|------|
-| `Transform`（默认） | OpenAI Responses → 任意 Adapter | 完整协议转换流水线 |
+| `Transform`（默认） | OpenAI Responses / OpenAI Chat Completions → 任意 Adapter | 完整协议转换流水线 |
 | `CaptureAnthropic` | Anthropic Messages → Anthropic | 透明投递 |
 | `CaptureResponse` | OpenAI Responses → OpenAI | 透明投递 |
+
+Transform 模式提供两个入口：`/v1/responses`（Codex、Kimi）与
+`/v1/chat/completions`（Crush 等 Chat Completions 客户端）。两者转换到同一
+Core 格式后共用路由、插件与统计，详见
+[`docs/chat-completions-ingress.md`](chat-completions-ingress.md)。
 
 ## 请求生命周期数据流（Transform 模式）
 

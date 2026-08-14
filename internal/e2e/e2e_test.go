@@ -16,6 +16,7 @@ import (
 	"moonbridge/internal/format"
 	"moonbridge/internal/protocol/anthropic"
 	"moonbridge/internal/protocol/chat"
+	"moonbridge/internal/protocol/chatingress"
 	"moonbridge/internal/protocol/google"
 	"moonbridge/internal/protocol/openai"
 )
@@ -101,6 +102,15 @@ func newTestRegistry(t testing.TB, cfg config.Config, hooks format.CorePluginHoo
 	}
 	if err := reg.RegisterClientStream(oaiAdapter); err != nil {
 		t.Fatalf("RegisterClientStream(openai-response): %v", err)
+	}
+
+	// --- OpenAI Chat Completions client adapter (inbound) ---
+	chatIngressAdapter := chatingress.NewAdapter(hooks)
+	if err := reg.RegisterClient(chatIngressAdapter); err != nil {
+		t.Fatalf("RegisterClient(openai-chat): %v", err)
+	}
+	if err := reg.RegisterClientStream(chatIngressAdapter); err != nil {
+		t.Fatalf("RegisterClientStream(openai-chat): %v", err)
 	}
 
 	// --- Anthropic provider adapter ---
@@ -232,7 +242,10 @@ func loadDotEnv(t testing.TB) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Log(".env.test not found — relying on OS env vars")
+			// t is nil when called from TestMain.
+			if t != nil {
+				t.Log(".env.test not found — relying on OS env vars")
+			}
 			return
 		}
 		dir = parent

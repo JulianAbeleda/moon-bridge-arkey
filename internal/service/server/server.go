@@ -188,6 +188,8 @@ func New(cfg Config) *Server {
 	}
 	s.mux.HandleFunc("/v1/responses", s.handleResponses)
 	s.mux.HandleFunc("/responses", s.handleResponses)
+	s.mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
+	s.mux.HandleFunc("/chat/completions", s.handleChatCompletions)
 	s.mux.HandleFunc("/v1/models", s.handleModels)
 	s.mux.HandleFunc("/models", s.handleModels)
 	s.mux.Handle("/console/", webui.Embedded())
@@ -411,8 +413,15 @@ func (s *Server) filterCandidatesByInput(candidates []provider.ProviderCandidate
 	if pm == nil {
 		return candidates, ""
 	}
-	hasImage := requestHasImage(input)
-	if !hasImage {
+	return s.filterCandidatesByImage(candidates, requestHasImage(input))
+}
+
+// filterCandidatesByImage drops candidates whose model cannot accept image
+// input. It is shared by every inbound protocol; only the image detection
+// differs between them.
+func (s *Server) filterCandidatesByImage(candidates []provider.ProviderCandidate, hasImage bool) ([]provider.ProviderCandidate, string) {
+	pm := s.activeProviderManager()
+	if pm == nil || !hasImage {
 		return candidates, ""
 	}
 	filtered := make([]provider.ProviderCandidate, 0, len(candidates))

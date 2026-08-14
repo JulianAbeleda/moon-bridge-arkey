@@ -166,7 +166,7 @@ func (server *Server) handleResponses(writer http.ResponseWriter, request *http.
 	// Adapter dispatch path for all non-OpenAI-Response protocols.
 	if server.adapterRegistry != nil {
 		if _, ok := server.adapterRegistry.GetProvider(preferred.Protocol); ok {
-			server.handleWithAdapters(writer, request, responsesRequest, resolvedRoute)
+			server.handleWithAdapters(writer, request, inboundFromResponses(&responsesRequest, config.ProtocolOpenAIResponse), resolvedRoute)
 			return
 		}
 	}
@@ -253,24 +253,6 @@ func writeJSON(writer http.ResponseWriter, status int, payload any) {
 }
 func writeOpenAIError(writer http.ResponseWriter, status int, payload openai.ErrorResponse) {
 	writeJSON(writer, status, payload)
-}
-func writeSSE(writer http.ResponseWriter, event openai.StreamEvent) error {
-	var payload []byte
-	if event.Data == nil {
-		payload = []byte("{}")
-	} else {
-		payload, _ = json.Marshal(event.Data)
-	}
-	if _, err := writer.Write([]byte("event: " + event.Event + "\n")); err != nil {
-		return err
-	}
-	if _, err := writer.Write([]byte("data: " + string(payload) + "\n\n")); err != nil {
-		return err
-	}
-	if flusher, ok := writer.(http.Flusher); ok {
-		flusher.Flush()
-	}
-	return nil
 }
 
 func (server *Server) handleOpenAIResponse(writer http.ResponseWriter, request *http.Request, responsesRequest openai.ResponsesRequest, candidates []provider.ProviderCandidate, record mbtrace.Record) {

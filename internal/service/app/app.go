@@ -20,6 +20,7 @@ import (
 	"moonbridge/internal/protocol/anthropic"
 	"moonbridge/internal/protocol/cache"
 	"moonbridge/internal/protocol/chat"
+	"moonbridge/internal/protocol/chatingress"
 	"moonbridge/internal/protocol/google"
 	"moonbridge/internal/protocol/openai"
 	"moonbridge/internal/service/provider"
@@ -257,6 +258,12 @@ func runTransform(ctx context.Context, cfg config.Config, errors io.Writer) erro
 	oaiAdapter := openai.NewOpenAIAdapter(coreHooks, codextool.Flat)
 	_ = adapterReg.RegisterClient(oaiAdapter)
 	_ = adapterReg.RegisterClientStream(oaiAdapter)
+
+	// Inbound: OpenAI Chat Completions client adapter, for clients that speak
+	// /v1/chat/completions rather than /v1/responses (Crush, Cline, Aider …).
+	chatIngressAdapter := chatingress.NewAdapter(coreHooks)
+	_ = adapterReg.RegisterClient(chatIngressAdapter)
+	_ = adapterReg.RegisterClientStream(chatIngressAdapter)
 
 	// Upstream: Anthropic provider adapter with cache manager.
 	cacheMgr := anthropic.NewCacheManager(&cfg.Cache, cacheReg)
