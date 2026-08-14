@@ -209,6 +209,7 @@ func (a *ChatProviderAdapter) ToCoreResponseWithRequest(ctx context.Context, req
 	coreResp := &format.CoreResponse{
 		ID:         chatResp.ID,
 		Status:     status,
+		Model:      chatResp.Model,
 		Messages:   messages,
 		StopReason: stopReason,
 	}
