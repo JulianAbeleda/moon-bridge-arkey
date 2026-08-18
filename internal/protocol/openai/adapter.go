@@ -1571,7 +1571,7 @@ func reasoningBlocksFromSummary(raw json.RawMessage) []format.CoreContentBlock {
 	}
 	blocks := make([]format.CoreContentBlock, 0, len(items))
 	for _, item := range items {
-		if item.Text == "" {
+		if item.Text == "" && item.Signature == "" {
 			continue
 		}
 		blocks = append(blocks, format.CoreContentBlock{

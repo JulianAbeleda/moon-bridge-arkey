@@ -78,7 +78,7 @@ func TestComputeCostWithProviderPricingNilStats(t *testing.T) {
 	}
 }
 
-func TestPrependCachedThinkingSkipsAssistantTextAndFallsBackForToolUse(t *testing.T) {
+func TestPrependCachedThinkingFallsBackForAssistantTextAndToolUse(t *testing.T) {
 	sess := session.New()
 	state := deepseekv4.NewState()
 	sess.InitExtensions(map[string]any{
@@ -104,8 +104,14 @@ func TestPrependCachedThinkingSkipsAssistantTextAndFallsBackForToolUse(t *testin
 
 	prependCachedThinking(req, sess)
 
-	if len(req.Messages[0].Content) != 1 || req.Messages[0].Content[0].Type != "text" {
-		t.Fatalf("assistant text message should remain unchanged, got %+v", req.Messages[0].Content)
+	if len(req.Messages[0].Content) != 2 {
+		t.Fatalf("assistant text message should receive fallback thinking block, got %+v", req.Messages[0].Content)
+	}
+	if req.Messages[0].Content[0].Type != "thinking" {
+		t.Fatalf("first block should be thinking fallback, got %+v", req.Messages[0].Content[0])
+	}
+	if req.Messages[0].Content[1].Type != "text" || req.Messages[0].Content[1].Text != "plain assistant text" {
+		t.Fatalf("text block misplaced after fallback prepend, got %+v", req.Messages[0].Content)
 	}
 
 	if len(req.Messages[1].Content) < 2 {
@@ -116,6 +122,46 @@ func TestPrependCachedThinkingSkipsAssistantTextAndFallsBackForToolUse(t *testin
 	}
 	if req.Messages[1].Content[1].Type != "tool_use" || req.Messages[1].Content[1].ID != "call-miss" {
 		t.Fatalf("tool_use block misplaced after fallback prepend, got %+v", req.Messages[1].Content)
+	}
+}
+
+func TestPrependCachedThinkingReplaysCachedThinkingForAssistantText(t *testing.T) {
+	sess := session.New()
+	state := deepseekv4.NewState()
+	state.RememberForAssistantText(
+		"plain assistant text",
+		format.CoreContentBlock{
+			Type:               "reasoning",
+			ReasoningText:      "replayed-text",
+			ReasoningSignature: "sig-text",
+		},
+	)
+	sess.InitExtensions(map[string]any{
+		"deepseek_v4": state,
+	})
+
+	req := &anthropic.MessageRequest{
+		Messages: []anthropic.Message{
+			{
+				Role: "assistant",
+				Content: []anthropic.ContentBlock{
+					{Type: "text", Text: "plain assistant text"},
+				},
+			},
+		},
+	}
+
+	prependCachedThinking(req, sess)
+
+	if len(req.Messages[0].Content) != 2 {
+		t.Fatalf("assistant text message should prepend cached thinking, got %+v", req.Messages[0].Content)
+	}
+	head := req.Messages[0].Content[0]
+	if head.Type != "thinking" || head.Thinking != "replayed-text" || head.Signature != "sig-text" {
+		t.Fatalf("cached thinking block mismatch, got %+v", head)
+	}
+	if req.Messages[0].Content[1].Type != "text" {
+		t.Fatalf("text block misplaced after cached prepend, got %+v", req.Messages[0].Content)
 	}
 }
 

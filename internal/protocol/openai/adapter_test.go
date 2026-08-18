@@ -61,6 +61,40 @@ func TestToCoreRequest_WithInstructions(t *testing.T) {
 	}
 }
 
+func TestToCoreRequest_ReasoningSummaryWithSignatureOnly(t *testing.T) {
+	adapter := openai.NewOpenAIAdapter(format.CorePluginHooks{})
+
+	req := &openai.ResponsesRequest{
+		Model: "deepseek-v4-pro",
+		Input: json.RawMessage(`[
+			{"type":"reasoning","summary":[{"type":"summary_text","signature":"sig-only"}]},
+			{"role":"assistant","type":"message","content":[{"type":"text","text":"assistant reply"}]}
+		]`),
+	}
+
+	result, err := adapter.ToCoreRequest(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(result.Messages))
+	}
+	msg := result.Messages[0]
+	if msg.Role != "assistant" {
+		t.Fatalf("got role %q, want assistant", msg.Role)
+	}
+	if len(msg.Content) != 2 {
+		t.Fatalf("got %d content blocks, want 2", len(msg.Content))
+	}
+	if msg.Content[0].Type != "reasoning" || msg.Content[0].ReasoningText != "" || msg.Content[0].ReasoningSignature != "sig-only" {
+		t.Fatalf("reasoning block mismatch: %+v", msg.Content[0])
+	}
+	if msg.Content[1].Type != "text" || msg.Content[1].Text != "assistant reply" {
+		t.Fatalf("text block mismatch: %+v", msg.Content[1])
+	}
+}
+
 func TestToCoreRequest_FunctionCallPreservesNamespace(t *testing.T) {
 	adapter := openai.NewOpenAIAdapter(format.CorePluginHooks{})
 

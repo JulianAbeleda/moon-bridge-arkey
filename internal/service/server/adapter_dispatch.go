@@ -2649,6 +2649,9 @@ func injectAnthropicWebSearch(req *anthropic.MessageRequest) {
 // for DeepSeek thinking chain replay across conversation turns.
 // It looks up cached thinking blocks from the session state and prepends them
 // before tool_use and text assistant messages in the upstream request.
+// DeepSeek requires a thinking block on EVERY assistant message in thinking
+// mode, so text-only assistant replies get the same replay or empty fallback
+// as tool-call messages.
 //
 // Important: unlike PrependThinkingBlockForToolUse (which always targets the
 // LAST message), this function targets the SPECIFIC assistant message that
@@ -2673,17 +2676,6 @@ func prependCachedThinking(upstreamReq *anthropic.MessageRequest, sess *session.
 		if msg.Role != "assistant" || len(msg.Content) == 0 {
 			continue
 		}
-		// Only tool-call assistant messages require thinking replay fallback.
-		hasToolUse := false
-		for _, block := range msg.Content {
-			if block.Type == "tool_use" {
-				hasToolUse = true
-				break
-			}
-		}
-		if !hasToolUse {
-			continue
-		}
 		// Check if the message already has a thinking block.
 		if hasThinkingBlock(msg.Content) {
 			continue
@@ -2701,9 +2693,17 @@ func prependCachedThinking(upstreamReq *anthropic.MessageRequest, sess *session.
 				break
 			}
 		}
+		// Try cached thinking by assistant text (text-only replies).
+		if !foundCachedThinking {
+			core := state.PrependCachedForAssistantText(anthropicContentSliceToFormat(msg.Content))
+			if len(core) > 0 && core[0].Type == "reasoning" {
+				msg.Content = formatContentSliceToAnthropic(core)
+				foundCachedThinking = true
+			}
+		}
 		// Fallback: prepend empty thinking block as response boundary.
 		// Prevents model from continuing previous response text.
-		if !foundCachedThinking && !hasThinkingBlock(msg.Content) {
+		if !foundCachedThinking {
 			prepended, _ := deepseekv4.PrependRequiredThinkingForAssistantText(anthropicContentSliceToFormat(msg.Content))
 			msg.Content = formatContentSliceToAnthropic(prepended)
 		}
@@ -2776,8 +2776,7 @@ func prependCachedReasoningForChat(chatReq *chat.ChatRequest, sess *session.Sess
 		}
 		// Fallback: set empty reasoning_content to satisfy DeepSeek's requirement
 		// that the field is present on every assistant message.
-		if msg.ReasoningContent == "" && len(msg.ToolCalls) > 0 {
-			msg.ReasoningContent = ""
+		if msg.ReasoningContent == "" {
 			msg.EmitEmptyReasoningContent = true
 		}
 	}
