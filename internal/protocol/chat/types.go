@@ -27,6 +27,11 @@ type ChatRequest struct {
 	// ("low" | "medium" | "high" | "minimal"). Populated from the inbound
 	// OpenAI Responses request's reasoning.effort.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// ChatTemplateKwargs carries arguments into the upstream's Jinja chat
+	// template. llama.cpp reads `enable_thinking` from here; it is the only
+	// per-request thinking switch a llama.cpp server has, and it ignores
+	// `reasoning_effort` entirely (measured against llama-server b9592).
+	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
 }
 
 // ChatMessage represents a single message in the conversation.

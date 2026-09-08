@@ -2797,3 +2797,54 @@ func TestFromCoreRequest_ToolCallArgumentsAreJSONString(t *testing.T) {
 		t.Errorf("unexpected city value: %v", obj["city"])
 	}
 }
+
+// A llama.cpp server ignores reasoning_effort and reads enable_thinking from
+// the chat template arguments. MoonBridge translates, so one vocabulary
+// reaches every upstream.
+func TestFromCoreRequest_EffortBecomesEnableThinkingForLocalProviders(t *testing.T) {
+	adapter := newTestAdapter()
+	build := func(effort string, local bool) *chat.ChatRequest {
+		core := &format.CoreRequest{
+			Model:    "arkey-server",
+			Messages: []format.CoreMessage{{Role: "user", Content: []format.CoreContentBlock{{Type: "text", Text: "hi"}}}},
+		}
+		if effort != "" {
+			core.Output = &format.CoreOutputConfig{Effort: effort}
+		}
+		if local {
+			format.MarkLocalProvider(core)
+		}
+		upstream, err := adapter.FromCoreRequest(context.Background(), core)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return upstream.(*chat.ChatRequest)
+	}
+
+	for effort, want := range map[string]bool{
+		"minimal": false, "none": false, "off": false,
+		"low": true, "medium": true, "high": true, "MAX": true,
+	} {
+		got := build(effort, true)
+		thinking, ok := got.ChatTemplateKwargs["enable_thinking"].(bool)
+		if !ok || thinking != want {
+			t.Errorf("effort %q: enable_thinking = %v (present %v), want %v", effort, thinking, ok, want)
+		}
+		if got.ReasoningEffort != effort {
+			t.Errorf("effort %q: reasoning_effort was dropped", effort)
+		}
+	}
+
+	// No effort named: leave the request alone so the server's own
+	// --reasoning default still governs.
+	if kwargs := build("", true).ChatTemplateKwargs; kwargs != nil {
+		t.Errorf("no effort must not set template kwargs, got %v", kwargs)
+	}
+	// A hosted provider gets effort only; enable_thinking is llama.cpp's word.
+	if kwargs := build("minimal", false).ChatTemplateKwargs; kwargs != nil {
+		t.Errorf("a non-local provider must not get template kwargs, got %v", kwargs)
+	}
+	if got := build("high", false).ReasoningEffort; got != "high" {
+		t.Errorf("a non-local provider keeps reasoning_effort, got %q", got)
+	}
+}

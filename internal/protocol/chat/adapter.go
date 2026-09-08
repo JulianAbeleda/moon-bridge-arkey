@@ -142,12 +142,47 @@ func (a *ChatProviderAdapter) FromCoreRequest(ctx context.Context, req *format.C
 	}
 
 	// reasoning_effort: surfaced from the OpenAI Responses input via
-	// Extensions["openai"]["reasoning"]["effort"] (see openai.OpenAIAdapter).
-	if effort := extractReasoningEffort(req.Extensions); effort != "" {
+	// Extensions["openai"]["reasoning"]["effort"] (see openai.OpenAIAdapter),
+	// or set directly on the Chat Completions ingress.
+	effort := extractReasoningEffort(req.Extensions)
+	if effort == "" && req.Output != nil {
+		effort = req.Output.Effort
+	}
+	if effort != "" {
 		chatReq.ReasoningEffort = effort
+	}
+	// A llama.cpp server ignores reasoning_effort and reads `enable_thinking`
+	// from the chat template arguments instead. Translate, so one vocabulary
+	// reaches every upstream: a caller asks for effort and MoonBridge speaks
+	// whichever dialect the provider has.
+	if format.IsLocalProvider(req) {
+		if thinking, ok := thinkingForEffort(effort); ok {
+			if chatReq.ChatTemplateKwargs == nil {
+				chatReq.ChatTemplateKwargs = map[string]any{}
+			}
+			chatReq.ChatTemplateKwargs["enable_thinking"] = thinking
+		}
 	}
 
 	return chatReq, nil
+}
+
+// thinkingForEffort maps an OpenAI effort level onto llama.cpp's binary
+// thinking switch. Effort is graded and llama.cpp is not: a llama.cpp server
+// either runs the template's thinking branch or it does not. `minimal` and
+// `none` are the two ways a caller says "do not think"; every other named
+// level means the caller wants thinking, and the model decides how much it
+// needs. An absent effort returns false for `ok`, which leaves the request
+// alone so the server's own `--reasoning` default still governs.
+func thinkingForEffort(effort string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "":
+		return false, false
+	case "minimal", "none", "off":
+		return false, true
+	default:
+		return true, true
+	}
 }
 
 // extractReasoningEffort pulls the reasoning effort string out of the OpenAI
